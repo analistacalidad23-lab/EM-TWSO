@@ -19,19 +19,19 @@ def load_data():
     # Leemos directamente desde la web
     df = pd.read_csv(url_sheet)
     
-    # Aislar y estandarizar columnas E, F y G para sectores a auditar
+    # Aislar y estandarizar columnas específicas solicitadas para auditoría y filtros
+    # Columna E (índice 4): Modelo
     df['Modelo_Estandarizado'] = df.iloc[:, 4].fillna('Sin Datos').astype(str).str.upper()
+    # Columna F (índice 5): Work Order: Vehículo: Modelo
     df['WO_Modelo'] = df.iloc[:, 5].fillna('Sin Datos').astype(str).str.upper()
+    # Columna G (índice 6): Tipo de trabajo
     df['Tipo_Trabajo'] = df.iloc[:, 6].fillna('Sin Datos').astype(str).str.upper()
     
-    # Estandarizar columnas de Fecha y extraer Mes/Año para análisis
-    columnas_fecha = ['FechaEM', 'Inicio real', 'Finalización real', 'Recepción Vehículo', 'Entrega Vehículo']
-    for col in columnas_fecha:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], format='%d/%m/%Y %H:%M', errors='coerce')
-            
-    # Crear columna de Mes-Año basada en FechaEM para el histórico (Formato YYYY-MM)
-    df['Mes_Anio'] = df['FechaEM'].dt.to_period('M').astype(str)
+    # Columna K (índice 10): FechaEM - Base para el filtro de fechas
+    df['FechaEM_Col_K'] = pd.to_datetime(df.iloc[:, 10], format='%d/%m/%Y', errors='coerce')
+    
+    # Crear columna de Mes-Año basada en la Columna K para el gráfico histórico
+    df['Mes_Anio'] = df['FechaEM_Col_K'].dt.to_period('M').astype(str)
     
     return df
 
@@ -63,35 +63,32 @@ def main():
         orden_km = sorted(df['Orden Kilometro'].dropna().unique().tolist())
         orden_km_sel = st.sidebar.multiselect("Orden Kilómetro:", orden_km, default=orden_km)
         
-        # 5. FechaEM (Rango)
-        # Limpiamos los nulos temporalmente solo para poder armar el selector de fechas
-        df_fechas_validas = df.dropna(subset=['FechaEM'])
+        # 5. Rango de Fechas (Basado estrictamente en Columna K)
+        df_fechas_validas = df.dropna(subset=['FechaEM_Col_K'])
         if not df_fechas_validas.empty:
-            min_date = df_fechas_validas['FechaEM'].min().date()
-            max_date = df_fechas_validas['FechaEM'].max().date()
+            min_date = df_fechas_validas['FechaEM_Col_K'].min().date()
+            max_date = df_fechas_validas['FechaEM_Col_K'].max().date()
             
-            # Control por si min_date y max_date son el mismo día
             if min_date == max_date:
                 fecha_inicio, fecha_fin = st.sidebar.date_input(
-                    "Rango FechaEM:", 
+                    "Rango FechaEM (Columna K):", 
                     value=(min_date, max_date), 
                     min_value=min_date, 
                     max_value=max_date
                 )
             else:
                 rango_fechas = st.sidebar.date_input(
-                    "Rango FechaEM:",
+                    "Rango FechaEM (Columna K):",
                     value=(min_date, max_date),
                     min_value=min_date,
                     max_value=max_date
                 )
-                # Manejar cuando el usuario está eligiendo la fecha y todavía no seleccionó la segunda
                 if len(rango_fechas) == 2:
                     fecha_inicio, fecha_fin = rango_fechas
                 else:
                     fecha_inicio = fecha_fin = rango_fechas[0]
         else:
-            st.warning("No hay fechas válidas en la columna FechaEM.")
+            st.warning("No hay fechas válidas en la Columna K.")
             return
 
         # --- APLICAR FILTROS ---
@@ -100,8 +97,8 @@ def main():
             (df['Tipo_Trabajo'].isin(trabajo_sel)) &
             (df['Modelo_Estandarizado'].isin(modelo_sel)) &
             (df['Orden Kilometro'].isin(orden_km_sel)) &
-            (df['FechaEM'].dt.date >= fecha_inicio) &
-            (df['FechaEM'].dt.date <= fecha_fin)
+            (df['FechaEM_Col_K'].dt.date >= fecha_inicio) &
+            (df['FechaEM_Col_K'].dt.date <= fecha_fin)
         ]
 
         if df_filtrado.empty:
@@ -131,16 +128,15 @@ def main():
             x='Patente', 
             y='Duración real (minutos)', 
             color='Modelo_Estandarizado',
-            hover_data=['Id Pre Orden', 'Orden Kilometro', 'Tipo_Trabajo', 'FechaEM'],
+            hover_data=['Id Pre Orden', 'Orden Kilometro', 'Tipo_Trabajo'],
             title="Detalle de Duración Real (Muestra las barras por cada vehículo ingresado)"
         )
         st.plotly_chart(fig_barras, use_container_width=True)
 
-        # Dividimos la pantalla en dos columnas para los promedios
+        # 2. Columnas para los promedios
         colA, colB = st.columns(2)
         
         with colA:
-            # 2. Promedio por Modelo
             st.subheader("Promedio de Duración por Modelo")
             promedio_modelo = df_filtrado.groupby('Modelo_Estandarizado')['Duración real (minutos)'].mean().reset_index()
             fig_prom_mod = px.bar(
@@ -154,10 +150,8 @@ def main():
             st.plotly_chart(fig_prom_mod, use_container_width=True)
 
         with colB:
-            # 3. Promedio por Mes
             st.subheader("Promedio de Duración por Mes")
             promedio_mes = df_filtrado.groupby('Mes_Anio')['Duración real (minutos)'].mean().reset_index().sort_values('Mes_Anio')
-            # Filtramos los 'NaT' por si alguna fecha quedó vacía
             promedio_mes = promedio_mes[promedio_mes['Mes_Anio'] != 'NaT'] 
             fig_prom_mes = px.bar(
                 promedio_mes, 
@@ -172,7 +166,7 @@ def main():
 
         st.markdown("---")
         
-        # 4. Histórico por Modelo (Tendencia en el tiempo)
+        # 3. Histórico por Modelo (Tendencia en el tiempo)
         st.subheader("Histórico de Duración por Modelo (Tendencia Mensual)")
         historico = df_filtrado.groupby(['Mes_Anio', 'Modelo_Estandarizado'])['Duración real (minutos)'].mean().reset_index().sort_values('Mes_Anio')
         historico = historico[historico['Mes_Anio'] != 'NaT']
