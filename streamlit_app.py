@@ -13,19 +13,21 @@ st.set_page_config(
 # 2. CARGA Y LIMPIEZA DE DATOS
 @st.cache_data
 def load_data():
-    # URL directa para descargar el CSV desde Google Sheets automáticamente
+    # URL directa para descargar el CSV desde Google Sheets
     url_sheet = "https://docs.google.com/spreadsheets/d/1grY2OAJkokZ9EZ74VvBKE5CDIVBlv05W-pCCTFIfup4/export?format=csv"
     
     # Leemos directamente desde la web
     df = pd.read_csv(url_sheet)
     
-    # Aislar y estandarizar columnas específicas solicitadas para auditoría y filtros
-    # Columna E (índice 4): Modelo
+    # Aislar y estandarizar columnas específicas solicitadas para auditoría (E, F, G)
     df['Modelo_Estandarizado'] = df.iloc[:, 4].fillna('Sin Datos').astype(str).str.upper()
-    # Columna F (índice 5): Work Order: Vehículo: Modelo
     df['WO_Modelo'] = df.iloc[:, 5].fillna('Sin Datos').astype(str).str.upper()
-    # Columna G (índice 6): Tipo de trabajo
     df['Tipo_Trabajo'] = df.iloc[:, 6].fillna('Sin Datos').astype(str).str.upper()
+    
+    # --- CORRECCIÓN DE NÚMEROS ---
+    # Convertimos la 'Duración real (minutos)' a numérico, reemplazando comas por puntos
+    if 'Duración real (minutos)' in df.columns:
+        df['Duración real (minutos)'] = pd.to_numeric(df['Duración real (minutos)'].astype(str).str.replace(',', '.'), errors='coerce')
     
     # Columna K (índice 10): FechaEM - Base para el filtro de fechas
     df['FechaEM_Col_K'] = pd.to_datetime(df.iloc[:, 10], format='%d/%m/%Y', errors='coerce')
@@ -112,10 +114,10 @@ def main():
             st.metric("Total Vehículos Filtrados", len(df_filtrado))
         with col2:
             promedio_general = df_filtrado['Duración real (minutos)'].mean()
-            st.metric("Promedio Duración (min)", f"{promedio_general:.1f}")
+            st.metric("Promedio Duración (min)", f"{promedio_general:.1f}" if pd.notna(promedio_general) else "0.0")
         with col3:
             max_duracion = df_filtrado['Duración real (minutos)'].max()
-            st.metric("Pico Máx. Duración (min)", f"{max_duracion:.1f}")
+            st.metric("Pico Máx. Duración (min)", f"{max_duracion:.1f}" if pd.notna(max_duracion) else "0.0")
 
         st.markdown("---")
 
@@ -129,11 +131,10 @@ def main():
             y='Duración real (minutos)', 
             color='Modelo_Estandarizado',
             hover_data=['Id Pre Orden', 'Orden Kilometro', 'Tipo_Trabajo'],
-            title="Detalle de Duración Real (Muestra las barras por cada vehículo ingresado)"
+            title="Detalle de Duración Real"
         )
         st.plotly_chart(fig_barras, use_container_width=True)
 
-        # 2. Columnas para los promedios
         colA, colB = st.columns(2)
         
         with colA:
