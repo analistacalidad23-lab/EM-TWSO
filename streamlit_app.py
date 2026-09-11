@@ -19,12 +19,18 @@ def load_data():
     # Leemos directamente desde la web
     df = pd.read_csv(url_sheet)
     
-    # Aislar y estandarizar columnas específicas solicitadas para auditoría (E, F, G)
+    # Aislar y estandarizar columnas específicas solicitadas (E, F, G)
     df['Modelo_Estandarizado'] = df.iloc[:, 4].fillna('Sin Datos').astype(str).str.upper()
     df['WO_Modelo'] = df.iloc[:, 5].fillna('Sin Datos').astype(str).str.upper()
     df['Tipo_Trabajo'] = df.iloc[:, 6].fillna('Sin Datos').astype(str).str.upper()
     
-    # --- CORRECCIÓN DE NÚMEROS ---
+    # Crear columna Registro utilizando estrictamente la Columna V (índice 21)
+    try:
+        df['Registro'] = df.iloc[:, 21].fillna('Sin Registro').astype(str)
+    except IndexError:
+        # Por si la hoja llega a tener menos de 22 columnas en algún momento
+        df['Registro'] = 'Sin Registro'
+    
     # Convertimos la 'Duración real (minutos)' a numérico, reemplazando comas por puntos
     if 'Duración real (minutos)' in df.columns:
         df['Duración real (minutos)'] = pd.to_numeric(df['Duración real (minutos)'].astype(str).str.replace(',', '.'), errors='coerce')
@@ -64,8 +70,12 @@ def main():
         # 4. Orden Kilometro
         orden_km = sorted(df['Orden Kilometro'].dropna().unique().tolist())
         orden_km_sel = st.sidebar.multiselect("Orden Kilómetro:", orden_km, default=orden_km)
+
+        # 5. Registro (Basado en Columna V)
+        registros = df['Registro'].dropna().unique().tolist()
+        registro_sel = st.sidebar.multiselect("Registro (Columna V):", registros, default=registros)
         
-        # 5. Rango de Fechas (Basado estrictamente en Columna K)
+        # 6. Rango de Fechas (Basado estrictamente en Columna K)
         df_fechas_validas = df.dropna(subset=['FechaEM_Col_K'])
         if not df_fechas_validas.empty:
             min_date = df_fechas_validas['FechaEM_Col_K'].min().date()
@@ -99,6 +109,7 @@ def main():
             (df['Tipo_Trabajo'].isin(trabajo_sel)) &
             (df['Modelo_Estandarizado'].isin(modelo_sel)) &
             (df['Orden Kilometro'].isin(orden_km_sel)) &
+            (df['Registro'].isin(registro_sel)) &
             (df['FechaEM_Col_K'].dt.date >= fecha_inicio) &
             (df['FechaEM_Col_K'].dt.date <= fecha_fin)
         ]
@@ -123,14 +134,13 @@ def main():
 
         # --- GRÁFICOS ---
         
-        # 1. Gráfico de Barras: Duración real por cada orden
         st.subheader("Duración Real por Vehículo")
         fig_barras = px.bar(
             df_filtrado, 
             x='Patente', 
             y='Duración real (minutos)', 
             color='Modelo_Estandarizado',
-            hover_data=['Id Pre Orden', 'Orden Kilometro', 'Tipo_Trabajo'],
+            hover_data=['Id Pre Orden', 'Orden Kilometro', 'Tipo_Trabajo', 'Registro'],
             title="Detalle de Duración Real"
         )
         st.plotly_chart(fig_barras, use_container_width=True)
@@ -167,7 +177,6 @@ def main():
 
         st.markdown("---")
         
-        # 3. Histórico por Modelo (Tendencia en el tiempo)
         st.subheader("Histórico de Duración por Modelo (Tendencia Mensual)")
         historico = df_filtrado.groupby(['Mes_Anio', 'Modelo_Estandarizado'])['Duración real (minutos)'].mean().reset_index().sort_values('Mes_Anio')
         historico = historico[historico['Mes_Anio'] != 'NaT']
@@ -181,6 +190,29 @@ def main():
         )
         fig_historico.update_xaxes(type='category')
         st.plotly_chart(fig_historico, use_container_width=True)
+        
+        st.markdown("---")
+        
+        # --- TABLA DE TIEMPOS EN ESTADO INCORRECTO ---
+        st.subheader("⚠️ Análisis de Tiempos en Estado Incorrecto (Mudas Operativas)")
+        st.markdown("Casos donde la *Duración real* registrada es igual a cero, negativa o nula.")
+        
+        df_incorrectos = df_filtrado[(df_filtrado['Duración real (minutos)'] <= 0) | (df_filtrado['Duración real (minutos)'].isna())]
+        
+        if not df_incorrectos.empty:
+            # Agrupar por Modelo y Tipo de Trabajo para contar la cantidad de casos
+            resumen_incorrectos = df_incorrectos.groupby(['Modelo_Estandarizado', 'Tipo_Trabajo']).size().reset_index(name='Cantidad de Casos')
+            
+            # Ordenar para ver los que tienen más errores primero
+            resumen_incorrectos = resumen_incorrectos.sort_values(by='Cantidad de Casos', ascending=False)
+            
+            st.dataframe(resumen_incorrectos, use_container_width=True)
+            
+            with st.expander("🔎 Ver detalle completo de las órdenes afectadas"):
+                columnas_detalle = ['Patente', 'Id Pre Orden', 'Modelo_Estandarizado', 'Tipo_Trabajo', 'Duración real (minutos)', 'Registro', 'FechaEM']
+                st.dataframe(df_incorrectos[[col for col in columnas_detalle if col in df_incorrectos.columns]], use_container_width=True)
+        else:
+            st.success("¡Excelente! No se encontraron tiempos en estado incorrecto con los filtros seleccionados.")
 
     except Exception as e:
         st.error(f"Ocurrió un error al procesar los datos: {e}. Verificá los permisos del Google Sheet o las columnas.")
