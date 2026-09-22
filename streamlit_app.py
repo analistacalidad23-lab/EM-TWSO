@@ -268,7 +268,7 @@ def main():
                         color = 'red' if val > 0 else 'green'
                         return f'color: {color}'
                     
-                    st.dataframe(df_sigma[columnas_variacion].style.applymap(color_variacion, subset=['Variación (min)']), use_container_width=True)
+                    st.dataframe(df_sigma[columnas_variacion].style.map(color_variacion, subset=['Variación (min)']), use_container_width=True)
                     
                 else:
                     st.info("No hay suficientes datos válidos para generar una Campana de Gauss para esta duración (se requieren al menos 2 casos).")
