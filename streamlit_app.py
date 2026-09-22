@@ -28,7 +28,6 @@ def load_data():
     df['Tipo_Trabajo'] = df.iloc[:, 6].fillna('Sin Datos').astype(str).str.upper()
     
     # Columna I (índice 8): Duración Ideal 
-    # La limpiamos y convertimos a número
     if len(df.columns) > 8:
         df['Duracion_Ideal'] = pd.to_numeric(df.iloc[:, 8].astype(str).str.replace(',', '.'), errors='coerce')
     else:
@@ -75,16 +74,12 @@ def main():
         # 3. Modelo (Columna E)
         modelos = df['Modelo_Estandarizado'].dropna().unique().tolist()
         modelo_sel = st.sidebar.multiselect("Modelo de Vehículo:", modelos, default=modelos)
-        
-        # 4. Orden Kilometro
-        orden_km = sorted(df['Orden Kilometro'].dropna().unique().tolist())
-        orden_km_sel = st.sidebar.multiselect("Orden Kilómetro:", orden_km, default=orden_km)
 
-        # 5. Registro (Basado en Columna V)
+        # 4. Registro (Basado en Columna V)
         registros = df['Registro'].dropna().unique().tolist()
         registro_sel = st.sidebar.multiselect("Registro (Columna V):", registros, default=registros)
         
-        # 6. Rango de Fechas (Basado estrictamente en Columna K)
+        # 5. Rango de Fechas (Basado estrictamente en Columna K)
         df_fechas_validas = df.dropna(subset=['FechaEM_Col_K'])
         if not df_fechas_validas.empty:
             min_date = df_fechas_validas['FechaEM_Col_K'].min().date()
@@ -107,7 +102,6 @@ def main():
             (df['Territorio de servicio: Nombre ↑'].isin(territorio_sel)) &
             (df['Tipo_Trabajo'].isin(trabajo_sel)) &
             (df['Modelo_Estandarizado'].isin(modelo_sel)) &
-            (df['Orden Kilometro'].isin(orden_km_sel)) &
             (df['Registro'].isin(registro_sel)) &
             (df['FechaEM_Col_K'].dt.date >= fecha_inicio) &
             (df['FechaEM_Col_K'].dt.date <= fecha_fin)
@@ -123,7 +117,7 @@ def main():
         tab1, tab2 = st.tabs(["📊 Panel Operativo (General)", "📈 Análisis Six Sigma (Variación)"])
 
         # ------------------------------------------
-        # PESTAÑA 1: PANEL OPERATIVO (Código anterior)
+        # PESTAÑA 1: PANEL OPERATIVO (General)
         # ------------------------------------------
         with tab1:
             st.subheader("Indicadores Generales")
@@ -186,7 +180,6 @@ def main():
             st.header("📈 Análisis de Variación del Proceso (Campana de Gauss)")
             st.markdown("Analizá la dispersión de los tiempos reales frente al tiempo ideal establecido en la **Columna I**.")
             
-            # Filtro específico para esta pestaña: Seleccionar el Tiempo Ideal a analizar
             duraciones_ideales = sorted(df_filtrado['Duracion_Ideal'].dropna().unique().tolist())
             
             if not duraciones_ideales:
@@ -198,26 +191,21 @@ def main():
                     help="Ejemplo: Si elegís '30', el gráfico analizará cómo variaron los trabajos que debían durar 30 minutos."
                 )
                 
-                # Filtramos el dataframe para analizar solo los trabajos que tienen ese tiempo ideal
                 df_sigma = df_filtrado[df_filtrado['Duracion_Ideal'] == duracion_seleccionada].copy()
                 datos_reales = df_sigma['Duración real (minutos)'].dropna()
                 
-                if len(datos_reales) > 1: # Necesitamos al menos 2 datos para hacer estadística
-                    # Calcular Media y Desviación Estándar (Sigma)
+                if len(datos_reales) > 1:
                     media_real = datos_reales.mean()
                     desviacion_estandar = datos_reales.std()
                     
-                    # KPIs Six Sigma
                     s_col1, s_col2, s_col3, s_col4 = st.columns(4)
                     s_col1.metric("Cantidad de Casos Analizados", len(datos_reales))
                     s_col2.metric("Tiempo Ideal (Target)", f"{duracion_seleccionada} min")
                     s_col3.metric("Media Real Alcanzada (μ)", f"{media_real:.1f} min", delta=f"{(media_real - duracion_seleccionada):.1f} min", delta_color="inverse")
                     s_col4.metric("Variación / Desv. Estándar (σ)", f"{desviacion_estandar:.1f} min")
                     
-                    # Generar la Campana de Gauss con Plotly
                     fig_sigma = go.Figure()
                     
-                    # 1. Histograma (Distribución de los datos reales)
                     fig_sigma.add_trace(go.Histogram(
                         x=datos_reales, 
                         histnorm='probability density', 
@@ -226,9 +214,7 @@ def main():
                         opacity=0.75
                     ))
                     
-                    # 2. Curva de Distribución Normal Teórica (Campana)
                     xmin, xmax = datos_reales.min(), datos_reales.max()
-                    # Si todos los valores son iguales, agregamos un margen para poder graficar
                     if xmin == xmax:
                         xmin, xmax = xmin - 5, xmax + 5
                         
@@ -242,10 +228,7 @@ def main():
                         line=dict(color='red', width=3)
                     ))
                     
-                    # 3. Línea del Tiempo Ideal (Target)
                     fig_sigma.add_vline(x=duracion_seleccionada, line_dash="dash", line_color="green", annotation_text="Tiempo Ideal", annotation_position="top left")
-                    
-                    # 4. Línea de la Media Real
                     fig_sigma.add_vline(x=media_real, line_dash="solid", line_color="orange", annotation_text="Media Real", annotation_position="top right")
                     
                     fig_sigma.update_layout(
@@ -257,17 +240,16 @@ def main():
                     
                     st.plotly_chart(fig_sigma, use_container_width=True)
                     
-                    # Detalle de variación por abajo
                     st.subheader(f"🔍 Detalle de Variación (Trabajos de {duracion_seleccionada} min)")
                     df_sigma['Variación (min)'] = df_sigma['Duración real (minutos)'] - df_sigma['Duracion_Ideal']
                     
                     columnas_variacion = ['Patente', 'Modelo_Estandarizado', 'Tipo_Trabajo', 'Registro', 'Duracion_Ideal', 'Duración real (minutos)', 'Variación (min)']
                     
-                    # Formato de color para la tabla (Rojo si tardó más, verde si tardó menos o igual)
                     def color_variacion(val):
                         color = 'red' if val > 0 else 'green'
                         return f'color: {color}'
                     
+                    # Corrección aplicada aquí: .map en lugar de .applymap
                     st.dataframe(df_sigma[columnas_variacion].style.map(color_variacion, subset=['Variación (min)']), use_container_width=True)
                     
                 else:
